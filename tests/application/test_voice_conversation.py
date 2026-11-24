@@ -7,12 +7,39 @@ from ports import Message
 
 
 class FakeDetector:
-    def record_turn(self):
+    def __init__(self, audio=None):
+        self.audio = np.array([0.1], dtype="float32") if audio is None else audio
+        self.stop_requested = None
+
+    def record_turn(self, stop_requested=None):
+        self.stop_requested = stop_requested
+        return self.audio
+
+
+class FakeActivation:
+    def __init__(self, shutdown_requested=False):
+        self.activations = 0
+        self.shutdown_requested = shutdown_requested
+
+    def wait_for_activation(self):
+        self.activations += 1
+
+    def is_shutdown_requested(self):
+        return self.shutdown_requested
+
+
+class ImmediateFakeActivation(FakeActivation):
+    def is_shutdown_requested(self):
+        return False
+
+
+class LegacyFakeDetector:
+    def record_turn(self, _stop_requested=None):
         return np.array([0.1], dtype="float32")
 
 
 class SilentDetector:
-    def record_turn(self):
+    def record_turn(self, _stop_requested=None):
         return None
 
 
@@ -43,11 +70,20 @@ class FakeSynthesizer:
         self.spoken.append(text)
 
 
+def make_conversation(detector=None, recognizer=None, model=None, synthesizer=None, activation=None):
+    return VoiceConversation(
+        activation or ImmediateFakeActivation(),
+        detector or FakeDetector(),
+        recognizer or FakeRecognizer(),
+        model or FakeModel(),
+        synthesizer or FakeSynthesizer(),
+        SpeechTextNormalizer(),
+    )
+
+
 def test_turn_is_transcribed_replied_to_and_spoken():
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        FakeDetector(), FakeRecognizer(), FakeModel(), speaker, SpeechTextNormalizer()
-    )
+    conversation = make_conversation(synthesizer=speaker)
 
     response = conversation.process_turn()
 
@@ -58,18 +94,14 @@ def test_turn_is_transcribed_replied_to_and_spoken():
 
 def test_empty_audio_does_not_call_model():
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        FakeDetector(), FakeRecognizer(), FakeModel(), speaker, SpeechTextNormalizer()
-    )
+    conversation = make_conversation(synthesizer=speaker)
 
     assert conversation.process_turn(np.array([], dtype="float32")) is None
     assert speaker.spoken == []
 
 
 def test_last_message_reflects_most_recent_entry():
-    conversation = VoiceConversation(
-        FakeDetector(), FakeRecognizer(), FakeModel(), FakeSynthesizer(), SpeechTextNormalizer()
-    )
+    conversation = make_conversation()
 
     assert conversation.last_message == Message("system", "You are Vaani, a friendly local voice assistant.")
 
@@ -82,9 +114,7 @@ def test_multi_sample_ndarray_audio_does_not_raise():
     # Regression test: real VAD output is a multi-element np.ndarray, whose truthiness
     # is ambiguous. process_turn must check emptiness without relying on `if not audio`.
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        FakeDetector(), FakeRecognizer(), FakeModel(), speaker, SpeechTextNormalizer()
-    )
+    conversation = make_conversation(synthesizer=speaker)
     audio = np.array([0.1, 0.2, 0.3], dtype="float32")
 
     response = conversation.process_turn(audio)
@@ -95,9 +125,7 @@ def test_multi_sample_ndarray_audio_does_not_raise():
 
 def test_empty_ndarray_audio_does_not_call_model():
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        FakeDetector(), FakeRecognizer(), FakeModel(), speaker, SpeechTextNormalizer()
-    )
+    conversation = make_conversation(synthesizer=speaker)
 
     assert conversation.process_turn(np.array([], dtype="float32")) is None
     assert speaker.spoken == []
@@ -107,9 +135,7 @@ def test_detector_returning_none_does_not_call_model():
     # Regression test: when no audio argument is given, process_turn falls back to
     # detector.record_turn(), which returns None on silence. Must not crash on len(None).
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        SilentDetector(), FakeRecognizer(), FakeModel(), speaker, SpeechTextNormalizer()
-    )
+    conversation = make_conversation(detector=SilentDetector(), synthesizer=speaker)
 
     assert conversation.process_turn() is None
     assert speaker.spoken == []
@@ -139,16 +165,33 @@ def test_detector_returning_none_does_not_call_model():
 )
 def test_markdown_is_normalized_only_for_speech(model_response, spoken_text):
     speaker = FakeSynthesizer()
-    conversation = VoiceConversation(
-        FakeDetector(),
-        FakeRecognizer(),
-        FixedResponseModel(model_response),
-        speaker,
-        SpeechTextNormalizer(),
-    )
+    conversation = make_conversation(model=FixedResponseModel(model_response), synthesizer=speaker)
 
     response = conversation.process_turn()
 
     assert speaker.spoken == [spoken_text]
     assert response == model_response
     assert conversation.last_message == Message("assistant", model_response)
+
+
+def test_waits_for_activation_before_recording_a_microphone_turn():
+    activation = FakeActivation()
+    detector = FakeDetector()
+    conversation = make_conversation(activation=activation, detector=detector)
+
+    conversation.process_turn()
+
+    assert activation.activations == 1
+    assert detector.stop_requested is not None
+    assert detector.stop_requested() is False
+
+
+def test_supplied_audio_bypasses_activation_and_microphone_capture():
+    activation = FakeActivation()
+    detector = FakeDetector()
+    conversation = make_conversation(activation=activation, detector=detector)
+
+    conversation.process_turn(np.array([0.1], dtype="float32"))
+
+    assert activation.activations == 0
+    assert detector.stop_requested is None

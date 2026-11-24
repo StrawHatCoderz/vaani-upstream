@@ -196,6 +196,12 @@ Set `--language` to the language code you want Whisper to recognize, or omit it 
 
 Useful environment variables are also supported: `VAANI_OLLAMA_MODEL`, `VAANI_OLLAMA_HOST`, `VAANI_WHISPER_MODEL`, `VAANI_LANGUAGE`, and `VAANI_PIPER`.
 
+Vaani's built-in activation starts recording immediately. Future push-to-talk
+and wake-word providers can start and stop a recording independently of speech
+recognition and response generation. As a fallback, recording ends after five
+seconds without speech; configure this with `--silence-timeout-ms` or
+`VAANI_SILENCE_TIMEOUT_MS`.
+
 ### A sample response
 
 Asked to introduce itself in verse, a local Llama 3.2 model running entirely on
