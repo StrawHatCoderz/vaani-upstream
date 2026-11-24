@@ -18,14 +18,6 @@ def test_uses_onnx_backend_and_preserves_vad_settings():
     )
 
 
-def test_default_silence_timeout_is_five_seconds():
-    with patch("adapters.silero_turn_detector.load_silero_vad"), \
-         patch("adapters.silero_turn_detector.VADIterator"):
-        detector = SileroTurnDetector()
-
-    assert detector._silence_ms == 5_000
-
-
 def _make_detector(mock_input_stream, vad_events):
     """Builds a detector whose VAD emits `vad_events` (cycled for every captured frame,
     across any number of `record_turn()` calls)."""
@@ -78,22 +70,3 @@ def test_record_turn_resets_vad_state_every_call(mock_input_stream):
     detector.record_turn()
 
     assert detector._vad.reset_states.call_count == 2
-
-
-@patch("adapters.silero_turn_detector.sd.InputStream")
-def test_provider_shutdown_stops_recording_and_returns_captured_audio(mock_input_stream):
-    detector = _make_detector(mock_input_stream, [{"start": 0}, {}, {}])
-    shutdown_requests = iter([False, False, True])
-
-    result = detector.record_turn(lambda: next(shutdown_requests))
-
-    assert len(result) == 2
-
-
-@patch("adapters.silero_turn_detector.sd.InputStream")
-def test_silence_timeout_ends_recording_before_speech_starts(mock_input_stream):
-    detector = _make_detector(mock_input_stream, [{}, {}])
-    with patch("adapters.silero_turn_detector.time.monotonic", side_effect=[0, 0, 6, 6]):
-        result = detector.record_turn()
-
-    assert result is None

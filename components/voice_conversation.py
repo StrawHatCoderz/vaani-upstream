@@ -32,7 +32,7 @@ class VoiceConversation:
     def process_turn(self, audio: np.ndarray | None = None) -> str | None:
         if audio is None:
             self._activation_provider.wait_for_activation()
-            audio = self._detector.record_turn(self._activation_provider.is_shutdown_requested)
+            audio = self._detector.record_turn()
         if audio is None or len(audio) == 0:
             return None
         text = self._recognizer.transcribe(audio, self._language)

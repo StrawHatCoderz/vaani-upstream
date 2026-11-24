@@ -1,3 +1,5 @@
+from threading import Event, Thread
+
 import numpy as np
 import pytest
 
@@ -7,39 +9,24 @@ from ports import Message
 
 
 class FakeDetector:
-    def __init__(self, audio=None):
-        self.audio = np.array([0.1], dtype="float32") if audio is None else audio
-        self.stop_requested = None
+    def __init__(self):
+        self.recordings = 0
 
-    def record_turn(self, stop_requested=None):
-        self.stop_requested = stop_requested
-        return self.audio
+    def record_turn(self):
+        self.recordings += 1
+        return np.array([0.1], dtype="float32")
 
 
 class FakeActivation:
-    def __init__(self, shutdown_requested=False):
+    def __init__(self):
         self.activations = 0
-        self.shutdown_requested = shutdown_requested
 
     def wait_for_activation(self):
         self.activations += 1
 
-    def is_shutdown_requested(self):
-        return self.shutdown_requested
-
-
-class ImmediateFakeActivation(FakeActivation):
-    def is_shutdown_requested(self):
-        return False
-
-
-class LegacyFakeDetector:
-    def record_turn(self, _stop_requested=None):
-        return np.array([0.1], dtype="float32")
-
 
 class SilentDetector:
-    def record_turn(self, _stop_requested=None):
+    def record_turn(self):
         return None
 
 
@@ -72,7 +59,7 @@ class FakeSynthesizer:
 
 def make_conversation(detector=None, recognizer=None, model=None, synthesizer=None, activation=None):
     return VoiceConversation(
-        activation or ImmediateFakeActivation(),
+        activation or FakeActivation(),
         detector or FakeDetector(),
         recognizer or FakeRecognizer(),
         model or FakeModel(),
@@ -175,15 +162,35 @@ def test_markdown_is_normalized_only_for_speech(model_response, spoken_text):
 
 
 def test_waits_for_activation_before_recording_a_microphone_turn():
-    activation = FakeActivation()
-    detector = FakeDetector()
+    activation_entered = Event()
+    release = Event()
+    capture_started = Event()
+
+    class BlockingActivation:
+        def wait_for_activation(self):
+            activation_entered.set()
+            assert release.wait(5)
+
+    class SignalingDetector(FakeDetector):
+        def record_turn(self):
+            capture_started.set()
+            return super().record_turn()
+
+    activation = BlockingActivation()
+    detector = SignalingDetector()
     conversation = make_conversation(activation=activation, detector=detector)
+    thread = Thread(target=conversation.process_turn)
+    thread.start()
+    try:
+        assert activation_entered.wait(5)
+        assert not capture_started.is_set()
+    finally:
+        release.set()
+        thread.join(timeout=5)
 
-    conversation.process_turn()
-
-    assert activation.activations == 1
-    assert detector.stop_requested is not None
-    assert detector.stop_requested() is False
+    assert not thread.is_alive()
+    assert capture_started.is_set()
+    assert detector.recordings == 1
 
 
 def test_supplied_audio_bypasses_activation_and_microphone_capture():
@@ -194,4 +201,4 @@ def test_supplied_audio_bypasses_activation_and_microphone_capture():
     conversation.process_turn(np.array([0.1], dtype="float32"))
 
     assert activation.activations == 0
-    assert detector.stop_requested is None
+    assert detector.recordings == 0

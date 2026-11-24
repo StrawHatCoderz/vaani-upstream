@@ -7,13 +7,6 @@ from adapters import ImmediateActivation, FasterWhisperRecognizer, OllamaModel, 
 from components import SpeechTextNormalizer, VoiceConversation
 
 
-def positive_int(value: str) -> int:
-    parsed = int(value)
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be greater than zero")
-    return parsed
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Talk to a local Ollama model with Vaani")
     parser.add_argument("--ollama-model", default=os.getenv("VAANI_OLLAMA_MODEL", "llama3.2"))
@@ -22,15 +15,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--language", default=os.getenv("VAANI_LANGUAGE"), help="Optional language code, e.g. en or ta")
     parser.add_argument("--piper", default=os.getenv("VAANI_PIPER", "piper"))
     parser.add_argument("--voice", required=True, help="Path to a Piper .onnx voice model")
-    parser.add_argument("--silence-timeout-ms", type=positive_int, default=os.getenv("VAANI_SILENCE_TIMEOUT_MS", "5000"),
-                        help="End recording after this many milliseconds without speech (default: 5000)")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
     conversation = VoiceConversation(
-        ImmediateActivation(), SileroTurnDetector(silence_ms=args.silence_timeout_ms), FasterWhisperRecognizer(args.whisper_model),
+        ImmediateActivation(), SileroTurnDetector(), FasterWhisperRecognizer(args.whisper_model),
         OllamaModel(args.ollama_model, args.ollama_host),
         PiperSynthesizer(args.piper, args.voice),
         SpeechTextNormalizer(), args.language,

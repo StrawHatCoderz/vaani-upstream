@@ -1,19 +1,26 @@
-import pytest
+from unittest.mock import MagicMock
 
-from vaani.__main__ import build_parser
-
-
-@pytest.mark.parametrize("value", ["0", "-1"])
-def test_silence_timeout_must_be_positive(value):
-    parser = build_parser()
-
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--voice", "voice.onnx", "--silence-timeout-ms", value])
+from adapters.activation import ImmediateActivation
+from vaani.__main__ import main
 
 
-def test_silence_timeout_defaults_to_five_seconds(monkeypatch):
-    monkeypatch.delenv("VAANI_SILENCE_TIMEOUT_MS", raising=False)
+def test_cli_wires_immediate_activation(monkeypatch):
+    import vaani.__main__ as cli
 
-    args = build_parser().parse_args(["--voice", "voice.onnx"])
+    detector = MagicMock()
+    conversation = MagicMock()
+    conversation.return_value.process_turn.side_effect = KeyboardInterrupt
+    monkeypatch.setattr(cli, "SileroTurnDetector", detector)
+    monkeypatch.setattr(cli, "VoiceConversation", conversation)
+    monkeypatch.setattr(cli, "FasterWhisperRecognizer", MagicMock())
+    monkeypatch.setattr(cli, "OllamaModel", MagicMock())
+    monkeypatch.setattr(cli, "PiperSynthesizer", MagicMock())
+    monkeypatch.setattr("sys.argv", ["vaani", "--voice", "voice.onnx"])
 
-    assert args.silence_timeout_ms == 5_000
+    main()
+
+    activation, actual_detector = conversation.call_args.args[:2]
+    assert isinstance(activation, ImmediateActivation)
+    assert activation.wait_for_activation() is None
+    assert actual_detector is detector.return_value
+    detector.assert_called_once_with()

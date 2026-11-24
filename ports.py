@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 import numpy as np
 
@@ -17,15 +17,13 @@ class SpeechRecognizer(Protocol):
 
 
 class VoiceActivityDetector(Protocol):
-    def record_turn(self, stop_requested: Callable[[], bool] | None = None) -> np.ndarray | None: ...
+    def record_turn(self) -> np.ndarray | None: ...
 
 
 class ActivationProvider(Protocol):
-    """Controls when microphone capture begins and ends for one user query."""
+    """Blocks until microphone capture may begin."""
 
     def wait_for_activation(self) -> None: ...
-
-    def is_shutdown_requested(self) -> bool: ...
 
 
 class ConversationModel(Protocol):

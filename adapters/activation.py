@@ -6,6 +6,3 @@ class ImmediateActivation:
 
     def wait_for_activation(self) -> None:
         return None
-
-    def is_shutdown_requested(self) -> bool:
-        return False
